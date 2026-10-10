@@ -1,0 +1,54 @@
+{
+  "name": "dsh-continuechat",
+  "version": "0.1.1",
+  "description": "Manually resume an interrupted DeepSeek Harness conversation: when a turn stopped by hand, by a network or provider failure, or by the output-token limit, one command picks the run up exactly where it stopped. | 手动继续被中断的 DSH 对话：当轮次因手动停止、网络或模型请求失败、输出 token 上限而中断时，一条命令即可从断点续跑。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md"
+  ],
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "continue",
+    "resume",
+    "interrupted",
+    "retry"
+  ],
+  "license": "MIT",
+  "author": "CaiBai-Fish",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CaiBai-Fish/dsh-continuechat.git"
+  },
+  "homepage": "https://github.com/CaiBai-Fish/dsh-continuechat#readme",
+  "bugs": {
+    "url": "https://github.com/CaiBai-Fish/dsh-continuechat/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
