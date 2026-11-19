@@ -122,6 +122,14 @@ provider 侧同样没有 assistant 前缀续写（prefill）能力（`dsh-llm-de
 
 插件没有构建步骤：`lib/index.js` 与 `lib/client.js` 就是最终产物，`package.json` 的 `files` 已把安装内容限定为运行时需要的 7 个文件（约 20 KB）。
 
+### 从 npm 安装
+
+```powershell
+dsh plugin --profile desktop add dsh-continuechat
+```
+
+包里没有依赖和构建脚本，安装后即可用；后续升级走正常的 npm 版本。
+
 ### 从 GitHub 安装
 
 ```powershell

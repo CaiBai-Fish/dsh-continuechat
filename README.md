@@ -122,6 +122,14 @@ Whether the footer being rendered belongs to an interrupted turn is answered by 
 
 The plugin has no build step: `lib/index.js` and `lib/client.js` are the shipped artifacts, and `files` limits an install to the seven runtime files (about 20 KB).
 
+### From npm
+
+```powershell
+dsh plugin --profile desktop add dsh-continuechat
+```
+
+The package carries no dependencies and no build script, so an install is immediately usable; later upgrades follow ordinary npm versions.
+
 ### From GitHub
 
 ```powershell
