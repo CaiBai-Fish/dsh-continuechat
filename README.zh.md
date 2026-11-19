@@ -4,7 +4,7 @@
 
 手动继续被中断的 DSH 对话。
 
-当一轮对话因为**手动停止**、**网络或模型请求失败**、或**输出 token 上限截断**而提前结束时，DSH 只在原地留下一个「已停止」标记。这个插件补上缺的那一步：一条 `/continue` 命令，以及被中断的那条回答下方操作行里的「继续对话」按钮，让 agent 从中断处接着干活，而不是重新开始。
+当一轮对话因为**手动停止**、**网络或模型请求失败**、或**输出 token 上限截断**而提前结束时，DSH 只在原地留下一个「已停止」标记。这个插件补上缺的那一步：一条 `/continue` 命令，以及被中断的那一轮末尾的「继续对话」按钮，让 agent 从中断处接着干活，而不是重新开始。
 
 ## 它解决什么
 
@@ -29,15 +29,16 @@
 
 ### 按钮
 
-被中断的那一轮，最后一条 assistant 消息下方的操作行（和「复制 / 点赞 / 点踩 / 分支」同一行）会出现一个「继续对话」按钮：
+被中断的那一轮，末尾（`turn/end` 之后）会出现一个「继续对话」按钮：
 
 - **只在真正中断时出现**。正常完成、被拦截（`blocked`）、fork 结尾（`forked`）的轮次都不显示，所以它不会出现在正常结束的对话下方。
-- 只有承载该轮结束的那条 assistant 消息会显示；同一会话的其他消息返回空，不占位置。
+- 只有最后一轮、且该轮结束时留下了可继续的中断原因时才显示；更早的轮次和正常结束的轮次都返回空，不占位置。
+- 该轮即使**没有产出任何 assistant 内容**（请求直接失败、进程在流式输出前就断了、崩溃恢复只剩 `turn/end`）也会显示。
 - agent 重新跑起来时自动隐藏。
 - 点击后就等于执行了一次 `/continue`。
 - 失败时按钮旁会显示一行错误文本（悬停可看完整信息）。
 
-判定读的是会话的持久事件窗口：取最新一条 `turn/end`，只有它的 reason 属于可继续集合、且该轮有**持久的** assistant 消息时才出现。因此**中断但没产生任何 assistant 输出的轮次**（例如请求直接失败、进程在流式输出前就断了）没有按钮可放——那种情况用 `/continue` 命令。
+判定读的是会话的持久事件窗口：取最新一条 `turn/end`，只有它的 reason 属于可继续集合、且当前渲染的正是这一轮的尾部时才出现。
 
 ### 快捷键与命令菜单
 
@@ -109,11 +110,13 @@ provider 侧同样没有 assistant 前缀续写（prefill）能力（`dsh-llm-de
 浏览器侧只做两件事：
 
 1. 注册 `continue-chat` 词典（中/英）。
-2. 在 `conversation.chat.assistant-actions` 插槽注册一个动作。这个插槽的 owner prop 是 `messageId`，渲染进 Chat 的 `MessageIconActions`，和复制 / 点赞 / 点踩 / 分支是同一个组件——所以按钮天然长在那一行里。
+2. 在 `conversation.chat.turnTail` 插槽注册一个动作。这是 Chat 的「已完成轮次尾部」扩展链，owner props 为 `{ turn, seq, openFile }`，每一轮结束时都会渲染。
+
+不用 `conversation.chat.assistant-actions` 的原因是新版 Chat 的行为：中断时被冻结的部分输出（`assistant/live-chunk`）不会变成带 `messageId` 的持久 `assistant/message`，`assistant/message` 的 `interrupted: true` 分支在客户端也没有 `messageId`，而 `assistant-actions` 只在 `closing.finalNode.messageId` 存在时才渲染；崩溃恢复的轮次则根本没有收尾消息。轮次尾部对每个 `turn/end` 都渲染，因此在所有中断形态下都能承载按钮。
 
 点击后用 `ctx.remote.commands.execute(sessionId, '/continue', [])` 执行宿主命令，和用户手动敲 `/continue` 完全同一条路径，因此命令的生命周期记录、结果渲染、日志都一致。
 
-「这条消息是否属于被中断的轮次」由会话自身的持久事件窗口回答：`ctx.sessions.binding(sessionId).eventSource` 是一个 `getSnapshot()`/`subscribe()` 的标准 store，插件用 `React.useSyncExternalStore` 订阅它，取最新一条 `turn/end` 的 reason 与该轮最后一条 `assistant/message` 的 `message.id`。快照按 `revision` 记忆化，因此几十条消息共用一次扫描，未命中的行不会重渲染。
+「当前尾部是否属于被中断的轮次」由会话自身的持久事件窗口回答：`ctx.sessions.binding(sessionId).eventSource` 是一个 `getSnapshot()`/`subscribe()` 的标准 store，插件用 `React.useSyncExternalStore` 订阅它，取最新一条 `turn/end` 的 reason 与轮次编号，和插槽给出的 `turn.turn` 比较。快照按 `revision` 记忆化，因此几十个轮次共用一次扫描，未命中的尾部不会重渲染。
 
 ## 安装
 
@@ -140,7 +143,7 @@ dsh plugin --profile desktop remove dsh-continuechat
 ## 它不做什么
 
 - **不自动继续**。触发永远来自人：命令、按钮，或者（如果你愿意）自己打字。想要自动续跑请用 `goal` 工具。
-- **不在正常结束的对话下显示按钮**。判定完全来自会话日志的 `turn/end` reason，不看「是不是最后一轮」这类猜测。
+- **不在正常结束的对话下显示按钮**。判定完全来自会话日志的 `turn/end` reason；「只显示在最新一轮」只为避免旧轮次的按钮指向已经变化的状态。
 - **不把新回答并进上一条消息**。架构上做不到，原因见上文；续写始终是一条新的 assistant 消息，插件只回收那条触发提示。
 - **不在 agent 运行时插队**。运行中执行 `/continue` 会返回错误提示，请先停止当前轮次。
 - **不重写已有历史**。续接只是一条新的 user 消息，追加在日志末尾。

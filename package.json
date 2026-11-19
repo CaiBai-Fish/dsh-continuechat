@@ -1,6 +1,6 @@
 {
   "name": "dsh-continuechat",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Manually resume an interrupted DeepSeek Harness conversation: when a turn stopped by hand, by a network or provider failure, or by the output-token limit, one command picks the run up exactly where it stopped. | 手动继续被中断的 DSH 对话：当轮次因手动停止、网络或模型请求失败、输出 token 上限而中断时，一条命令即可从断点续跑。",
   "type": "module",
   "main": "lib/index.js",

@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Manually resume an interrupted DeepSeek Harness conversation.
 
-When a turn ends early — stopped by hand, cut short by a failed model request, or truncated by the output-token limit — the harness leaves nothing behind but a "stopped" marker. This plugin adds the missing step: a `/continue` command and a **Continue** action in the action row under the interrupted reply itself, so the run picks up exactly where it stopped instead of restarting.
+When a turn ends early — stopped by hand, cut short by a failed model request, or truncated by the output-token limit — the harness leaves nothing behind but a "stopped" marker. This plugin adds the missing step: a `/continue` command and a **Continue** action at the end of the interrupted turn, so the run picks up exactly where it stopped instead of restarting.
 
 ## What it solves
 
@@ -29,15 +29,16 @@ The command's outcome (`已请求继续对话（中断原因：手动停止）�
 
 ### Button
 
-On the turn that was cut short, a **Continue** action appears in the action row under the closing assistant message — the same row that carries copy / thumbs-up / thumbs-down / branch:
+At the end of the turn that was cut short (after its `turn/end`), a **Continue** action appears:
 
 - **It only appears on a real interruption.** Turns that completed, were blocked, or merely closed a fork show nothing, so the button never shows up under a conversation that ended normally.
-- Only the assistant message that closes that turn carries it; every other message renders nothing and takes no space.
+- It appears only on the newest turn, and only when that turn ended with a resumable reason; every other turn footer renders nothing and takes no space.
+- It appears even when the turn produced **no assistant output at all** — a request that failed outright, a process that died before streaming, or a crash recovery that only left the `turn/end` closer.
 - It disappears again once the agent is running.
 - Clicking it is exactly one `/continue` execution.
 - A failed attempt keeps a short error line next to the action (hover for the full text).
 
-The decision comes from the session's durable event window: the newest `turn/end` must have a resumable reason *and* that turn must carry a **persistent** assistant message. A turn that was interrupted **before producing any assistant output** (a request that failed outright, a process that died before streaming) therefore has nowhere to host the button — use the `/continue` command there.
+The decision comes from the session's durable event window: the newest `turn/end` must have a resumable reason *and* the footer being rendered must belong to that same turn.
 
 ### Command menu
 
@@ -109,11 +110,13 @@ The continuation message is built by hand as `{ id, role: 'user', content: [{ ty
 The client half does exactly two things:
 
 1. Registers the `continue-chat` dictionaries (zh/en).
-2. Registers one action in the `conversation.chat.assistant-actions` slot. That slot's owner prop is `messageId` and its entries render inside Chat's `MessageIconActions` — the very component that owns copy / rating / branch — so the button lands in that row by construction.
+2. Registers one action in the `conversation.chat.turnTail` slot. That is Chat's completed-turn footer chain, with owner props `{ turn, seq, openFile }`, and it renders for every closed turn.
+
+Why not `conversation.chat.assistant-actions`: current Chat freezes an interrupted stream as an `assistant/live-chunk` partial that never becomes a durable `assistant/message` carrying a `messageId`, and its `interrupted: true` assistant branch has no `messageId` either; `assistant-actions` renders only when `closing.finalNode.messageId` exists, and a crash-recovered turn has no closing message at all. The turn footer renders for every `turn/end`, so it can host the action in every interruption shape.
 
 Clicking it runs `ctx.remote.commands.execute(sessionId, '/continue', [])`, the same path a hand-typed `/continue` takes, so command lifecycle records, result rendering, and logging all stay identical.
 
-Whether a message belongs to an interrupted turn is answered by the session's own durable event window: `ctx.sessions.binding(sessionId).eventSource` is a plain `getSnapshot()`/`subscribe()` store, which the plugin reads through `React.useSyncExternalStore` — newest `turn/end` reason plus the `message.id` of that turn's last `assistant/message`. Snapshots are memoized per `revision`, so dozens of messages share one scan and the untouched rows never re-render.
+Whether the footer being rendered belongs to an interrupted turn is answered by the session's own durable event window: `ctx.sessions.binding(sessionId).eventSource` is a plain `getSnapshot()`/`subscribe()` store, which the plugin reads through `React.useSyncExternalStore` — the newest `turn/end` reason and turn number, compared with the footer's `turn.turn`. Snapshots are memoized per `revision`, so dozens of turns share one scan and the untouched footers never re-render.
 
 ## Install
 
@@ -132,7 +135,7 @@ dsh plugin --profile desktop remove dsh-continuechat
 ## What it deliberately does not do
 
 - **It never continues on its own.** Every trigger is human: a command, the button, or your own typing. For automatic continuation use the `goal` tool.
-- **It never shows the button under a normally finished conversation.** The decision comes straight from the session log's `turn/end` reason, not from a guess about which turn is last.
+- **It never shows the button under a normally finished conversation.** The decision comes straight from the session log's `turn/end` reason; limiting it to the newest turn only keeps an old turn's button from pointing at a state that has moved on.
 - **It never merges the new answer into the previous message.** That is impossible in this architecture (see above); the continuation is always a new assistant message, and the plugin only retires its own trigger prompt.
 - **It never cuts in while the agent runs.** `/continue` against a running agent reports an error instead; stop the turn first.
 - **It never rewrites history.** A continuation is one new user message appended to the log.

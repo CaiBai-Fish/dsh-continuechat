@@ -102,17 +102,21 @@ function entry(event) {
   return { type: 'persistent', event }
 }
 
-/** A turn that ended early, closing one assistant message. */
+/**
+ * The shape the real window uses for live chunks: durable events and
+ * client-only transient rows share one entry list.
+ */
+const liveChunk = (turn, step, text) => entry({
+  type: 'transient',
+  event: { type: 'assistant/live-chunk', seq: 2, time: 3, data: { attemptId: 'a1', turn, step, chunk: { type: 'text', text } } },
+})
+
+/** A turn that ended early with a frozen partial and no durable assistant message. */
 const interruptedEntries = [
-  entry({ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }),
+  entry({ type: 'turn/start', seq: 0, time: 1, data: { turn: 4 } }),
   entry({ type: 'user/message', seq: 1, time: 2, data: { id: 'u1', role: 'user' } }),
-  entry({
-    type: 'assistant/message',
-    seq: 2,
-    time: 3,
-    data: { turn: 1, step: 0, message: { id: 'm-interrupted', role: 'assistant' }, interrupted: true },
-  }),
-  entry({ type: 'turn/end', seq: 3, time: 4, data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } } }),
+  liveChunk(4, 0, 'partial output'),
+  entry({ type: 'turn/end', seq: 3, time: 4, data: { turn: 4, reason: { kind: 'aborted', reason: { kind: 'user' } } } }),
 ]
 
 /** A turn that finished on its own. */
@@ -186,8 +190,8 @@ function createClientHarness(execute, eventSource = createEventSource([])) {
   return { ctx, locales, injections, registrations, calls }
 }
 
-/** Materialize the single action registration the plugin makes (idempotent). */
-function mountAction(harness) {
+/** Materialize the single footer registration the plugin makes (idempotent). */
+function mountEntry(harness) {
   if (harness.registrations.length === 0) {
     for (const injection of harness.injections) injection.register()
   }
@@ -195,11 +199,13 @@ function mountAction(harness) {
   return harness.registrations[0]
 }
 
-/** Props one rendered action receives, with a chosen owning message. */
-function actionProps(harness, messageId, overrides = {}) {
-  const injected = mountAction(harness).options.inject('session-1')
+/** Props one rendered footer receives, with a chosen owning turn. */
+function turnProps(harness, turnNumber, overrides = {}) {
+  const injected = mountEntry(harness).options.inject('session-1')
   return {
-    messageId,
+    turn: { kind: 'turn', turn: turnNumber },
+    seq: 0,
+    openFile() {},
     useSession: (select) => select({ running: false }),
     resumeSource: injected.resumeSource,
     resume: injected.resume,
@@ -221,7 +227,7 @@ test('the factory exports the cordis plugin surface', () => {
   assert.equal(typeof exports.apply, 'function')
 })
 
-test('apply registers the dictionaries and the assistant action row', () => {
+test('apply registers the dictionaries and the completed-turn footer entry', () => {
   const exports = loadBundle()
   const harness = createClientHarness(async () => ({ ok: true, value: undefined }))
   exports.apply(harness.ctx)
@@ -231,36 +237,51 @@ test('apply registers the dictionaries and the assistant action row', () => {
   assert.equal(dictionaries.en['action.label'], 'Continue')
 
   assert.equal(harness.injections.length, 1)
-  assert.equal(harness.injections[0].name, 'conversation.chat.assistant-actions')
+  assert.equal(harness.injections[0].name, 'conversation.chat.turnTail')
 
-  const action = mountAction(harness)
-  assert.equal(action.options.name, 'conversation.chat.assistant-actions')
+  const action = mountEntry(harness)
+  assert.equal(action.options.name, 'conversation.chat.turnTail')
   assert.equal(action.options.id, 'dsh-continuechat')
   assert.equal(action.options.locale, 'continue-chat')
   assert.equal(typeof action.options.inject, 'function')
   assert.ok(
-    infoLogs.some((line) => line.includes('browser half ready') && line.includes('assistant-actions')),
-    'the plugin announces the action row it registered into',
+    infoLogs.some((line) => line.includes('browser half ready') && line.includes('turn footer')),
+    'the plugin announces the slot it registered into',
   )
 })
 
-test('the action only renders on the message that closed an interrupted turn', () => {
+test('the action only renders on the turn that ended early', () => {
   const exports = loadBundle()
   const harness = createClientHarness(
     async () => ({ ok: true, value: undefined }),
     createEventSource(interruptedEntries),
   )
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
   hookSlots = []
-  const shown = component(actionProps(harness, 'm-interrupted'))
+  const shown = component(turnProps(harness, 4))
   assert.notEqual(shown, null)
+  assert.equal(shown.props.className, 'dshContinueChat_footer')
   assert.equal(shown.props.children[0].type, 'button')
   assert.ok(infoLogs.some((line) => line.includes('resumable turn (aborted)')))
 
   hookSlots = []
-  assert.equal(component(actionProps(harness, 'some-earlier-message')), null)
+  assert.equal(component(turnProps(harness, 3)), null)
+})
+
+test('an interrupted turn with no assistant output still offers the action', () => {
+  const exports = loadBundle()
+  const harness = createClientHarness(
+    async () => ({ ok: true, value: undefined }),
+    createEventSource([
+      entry({ type: 'turn/start', seq: 0, time: 1, data: { turn: 7 } }),
+      entry({ type: 'turn/end', seq: 1, time: 2, data: { turn: 7, reason: { kind: 'interrupted' } } }),
+    ]),
+  )
+  exports.apply(harness.ctx)
+  hookSlots = []
+  assert.notEqual(mountEntry(harness).component(turnProps(harness, 7)), null)
 })
 
 test('a turn that finished normally offers no action', () => {
@@ -270,10 +291,27 @@ test('a turn that finished normally offers no action', () => {
     createEventSource(completedEntries),
   )
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
   hookSlots = []
-  assert.equal(component(actionProps(harness, 'm-done')), null)
+  assert.equal(component(turnProps(harness, 1)), null)
+})
+
+test('a followed-up conversation offers no action on the older turn', () => {
+  const exports = loadBundle()
+  const harness = createClientHarness(
+    async () => ({ ok: true, value: undefined }),
+    createEventSource([
+      ...interruptedEntries,
+      entry({ type: 'turn/start', seq: 4, time: 5, data: { turn: 5 } }),
+      entry({ type: 'user/message', seq: 5, time: 6, data: { id: 'u2', role: 'user' } }),
+      entry({ type: 'assistant/message', seq: 6, time: 7, data: { turn: 5, step: 0, message: { id: 'm5', role: 'assistant' } } }),
+      entry({ type: 'turn/end', seq: 7, time: 8, data: { turn: 5, reason: { kind: 'completed' } } }),
+    ]),
+  )
+  exports.apply(harness.ctx)
+  hookSlots = []
+  assert.equal(mountEntry(harness).component(turnProps(harness, 4)), null)
 })
 
 test('blocked and forked turn ends offer no action', () => {
@@ -288,11 +326,11 @@ test('blocked and forked turn ends offer no action', () => {
     )
     exports.apply(harness.ctx)
     hookSlots = []
-    assert.equal(mountAction(harness).component(actionProps(harness, 'm')), null)
+    assert.equal(mountEntry(harness).component(turnProps(harness, 1)), null)
   }
 })
 
-test('a truncated reply offers the action', () => {
+test('a truncated or failed reply offers the action', () => {
   for (const kind of ['max-tokens', 'error', 'interrupted']) {
     const exports = loadBundle()
     const harness = createClientHarness(
@@ -304,7 +342,7 @@ test('a truncated reply offers the action', () => {
     )
     exports.apply(harness.ctx)
     hookSlots = []
-    assert.notEqual(mountAction(harness).component(actionProps(harness, 'm')), null, kind)
+    assert.notEqual(mountEntry(harness).component(turnProps(harness, 1)), null, kind)
   }
 })
 
@@ -315,10 +353,10 @@ test('the action hides while the agent is running again', () => {
     createEventSource(interruptedEntries),
   )
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
   hookSlots = []
-  const props = actionProps(harness, 'm-interrupted', { useSession: (select) => select({ running: true }) })
+  const props = turnProps(harness, 4, { useSession: (select) => select({ running: true }) })
   assert.equal(component(props), null)
 })
 
@@ -330,7 +368,7 @@ test('resume runs the host /continue command for its own session', async () => {
   }))
   exports.apply(harness.ctx)
 
-  const failure = await mountAction(harness).options.inject('session-42').resume()
+  const failure = await mountEntry(harness).options.inject('session-42').resume()
 
   assert.equal(failure, null)
   assert.deepEqual(harness.calls, [['session-42', '/continue', []]])
@@ -344,7 +382,7 @@ test('a refused RPC is reported as a failure message', async () => {
   }))
   exports.apply(harness.ctx)
 
-  const failure = await mountAction(harness).options.inject('s').resume()
+  const failure = await mountEntry(harness).options.inject('s').resume()
   assert.equal(failure, 'connection closed (UNAVAILABLE)')
 })
 
@@ -353,7 +391,7 @@ test('an unknown command name is reported instead of silently succeeding', async
   const harness = createClientHarness(async () => ({ ok: true, value: undefined }))
   exports.apply(harness.ctx)
 
-  const failure = await mountAction(harness).options.inject('s').resume()
+  const failure = await mountEntry(harness).options.inject('s').resume()
   assert.match(failure, /未找到 \/continue 命令/u)
 })
 
@@ -365,7 +403,7 @@ test('a handler error result is surfaced as the failure message', async () => {
   }))
   exports.apply(harness.ctx)
 
-  const failure = await mountAction(harness).options.inject('s').resume()
+  const failure = await mountEntry(harness).options.inject('s').resume()
   assert.equal(failure, '对话仍在运行中：请先停止当前轮次，再执行 /continue。')
 })
 
@@ -376,10 +414,10 @@ test('clicking flips the label to busy and calls resume once', () => {
     createEventSource(interruptedEntries),
   )
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
   let resumed = 0
-  const props = actionProps(harness, 'm-interrupted', {
+  const props = turnProps(harness, 4, {
     resume: async () => {
       resumed += 1
       return null
@@ -411,9 +449,9 @@ test('a failed attempt keeps the failure on the action', async () => {
     createEventSource(interruptedEntries),
   )
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
-  const props = actionProps(harness, 'm-interrupted', { resume: async () => '对话仍在运行中' })
+  const props = turnProps(harness, 4, { resume: async () => '对话仍在运行中' })
 
   hookSlots = []
   render(component, props) // mount: seeds the hook slots
@@ -435,9 +473,9 @@ test('an unbound session degrades to no action instead of throwing', () => {
   const harness = createClientHarness(async () => ({ ok: true, value: undefined }))
   harness.ctx.sessions.binding = () => undefined
   exports.apply(harness.ctx)
-  const component = mountAction(harness).component
+  const component = mountEntry(harness).component
 
   hookSlots = []
-  assert.equal(component(actionProps(harness, 'm')), null)
+  assert.equal(component(turnProps(harness, 4)), null)
   assert.ok(warnLogs.some((line) => line.includes('no client session binding')))
 })
