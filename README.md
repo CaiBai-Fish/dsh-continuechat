@@ -120,6 +120,22 @@ Whether the footer being rendered belongs to an interrupted turn is answered by 
 
 ## Install
 
+The plugin has no build step: `lib/index.js` and `lib/client.js` are the shipped artifacts, and `files` limits an install to the seven runtime files (about 20 KB).
+
+### From GitHub
+
+```powershell
+dsh plugin --profile desktop add "github:CaiBai-Fish/dsh-continuechat#v0.1.2"
+```
+
+`#v0.1.2` may be any tag, branch, or commit; omit it to follow the default branch. `dsh plugin` forwards its arguments to pnpm, so npm / pnpm install the same spec directly:
+
+```powershell
+pnpm add "github:CaiBai-Fish/dsh-continuechat#v0.1.2"
+```
+
+### From a local directory (development)
+
 ```powershell
 dsh plugin --profile desktop add <absolute path to this directory>
 ```

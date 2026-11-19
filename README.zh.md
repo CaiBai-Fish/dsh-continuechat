@@ -120,7 +120,21 @@ provider 侧同样没有 assistant 前缀续写（prefill）能力（`dsh-llm-de
 
 ## 安装
 
-在插件目录所在位置执行：
+插件没有构建步骤：`lib/index.js` 与 `lib/client.js` 就是最终产物，`package.json` 的 `files` 已把安装内容限定为运行时需要的 7 个文件（约 20 KB）。
+
+### 从 GitHub 安装
+
+```powershell
+dsh plugin --profile desktop add "github:CaiBai-Fish/dsh-continuechat#v0.1.2"
+```
+
+`#v0.1.2` 可换成任意 tag、分支或提交；省略则跟随默认分支的最新提交。DSH 的插件安装就是把参数转交给 pnpm，所以 npm / pnpm 也能直接安装：
+
+```powershell
+pnpm add "github:CaiBai-Fish/dsh-continuechat#v0.1.2"
+```
+
+### 从本地目录安装（开发）
 
 ```powershell
 dsh plugin --profile desktop add <插件目录的绝对路径>
